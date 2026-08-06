@@ -1,0 +1,1223 @@
+// ============================================================
+// Hangout Platform — Full Database Schema
+// ============================================================
+// Generator + Datasource
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserStatus {
+  ONLINE
+  IDLE
+  DO_NOT_DISTURB
+  INVISIBLE
+  OFFLINE
+}
+
+enum GroupRole {
+  OWNER
+  ADMIN
+  MODERATOR
+  MEMBER
+}
+
+enum ChannelType {
+  TEXT
+  VOICE
+  VIDEO
+  ANNOUNCEMENT
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  FILE
+  AUDIO
+  SYSTEM
+  POLL
+  GIF
+  STICKER
+}
+
+enum EventStatus {
+  DRAFT
+  SCHEDULED
+  ONGOING
+  COMPLETED
+  CANCELLED
+}
+
+enum EventType {
+  MOVIE_NIGHT
+  TRIP
+  BIRTHDAY
+  REUNION
+  STUDY_SESSION
+  GAME_NIGHT
+  CUSTOM
+}
+
+enum GameType {
+  UNO
+  CHESS
+  LUDO
+  PICTIONARY
+  CONNECT_FOUR
+  TRUTH_OR_DARE
+  WOULD_YOU_RATHER
+  QUIZ_ARENA
+  DRAWING
+  MEMORY_GAME
+  ROCK_PAPER_SCISSORS
+  TRIVIA
+}
+
+enum GameStatus {
+  WAITING
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+enum NotificationType {
+  MESSAGE
+  MENTION
+  REACTION
+  FRIEND_REQUEST
+  FRIEND_ACCEPT
+  GROUP_INVITE
+  EVENT_REMINDER
+  BIRTHDAY
+  MEMORY_SURFACED
+  GAME_INVITE
+  VOICE_INVITE
+  ACHIEVEMENT
+}
+
+enum TimeCapsuleStatus {
+  SEALED
+  UNLOCKED
+  ARCHIVED
+}
+
+enum MediaType {
+  PHOTO
+  VIDEO
+  DOCUMENT
+  AUDIO
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  BLOCKED
+}
+
+enum AchievementType {
+  SOCIAL
+  GAMING
+  MEMORIES
+  EVENTS
+  MILESTONES
+}
+
+// ============================================================
+// CORE USER MODELS
+// ============================================================
+
+model User {
+  id              String     @id @default(cuid())
+  supabaseId      String?    @unique @map("supabase_id")
+  email           String     @unique
+  username        String     @unique
+  displayName     String     @map("display_name")
+  bio             String?
+  avatarUrl       String?    @map("avatar_url")
+  bannerUrl       String?    @map("banner_url")
+  status          UserStatus @default(OFFLINE)
+  customStatus    String?    @map("custom_status")
+  timezone        String?
+  locale          String?    @default("en")
+  isVerified      Boolean    @default(false) @map("is_verified")
+  is2FAEnabled    Boolean    @default(false) @map("is_2fa_enabled")
+  twoFASecret     String?    @map("two_fa_secret")
+  lastSeenAt      DateTime?  @map("last_seen_at")
+  onboardingDone  Boolean    @default(false) @map("onboarding_done")
+  birthday        DateTime?
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  // Relations
+  sentFriendRequests     FriendRequest[]    @relation("SentRequests")
+  receivedFriendRequests FriendRequest[]    @relation("ReceivedRequests")
+  groupMemberships       GroupMember[]
+  ownedGroups            Group[]            @relation("GroupOwner")
+  messages               Message[]
+  reactions              MessageReaction[]
+  uploadedMedia          Media[]
+  photoTags              PhotoTag[]
+  comments               Comment[]
+  likes                  Like[]
+  notifications          Notification[]
+  pushSubscriptions      PushSubscription[]
+  gameSessions           GameParticipant[]
+  timeCapsules           TimeCapsule[]      @relation("TimeCapsuleCreator")
+  timeCapsuleMessages    TimeCapsuleMessage[]
+  achievements           UserAchievement[]
+  eventAttendances       EventAttendee[]
+  pollVotes              PollVote[]
+  voiceRoomParticipants  VoiceRoomParticipant[]
+  createdEvents          Event[]            @relation("EventCreator")
+  createdChannels        Channel[]          @relation("ChannelCreator")
+  pinnedMessages         PinnedMessage[]
+  threadMessages         ThreadMessage[]
+  directMessages         DirectMessage[]    @relation("DMSender")
+  receivedDirectMessages DirectMessage[]    @relation("DMReceiver")
+  ownedTimeCapsules      TimeCapsule[]      @relation("TimeCapsuleOwner")
+  activityLog            ActivityLog[]
+  analyticsData          Analytics[]
+
+  @@index([email])
+  @@index([username])
+  @@index([supabaseId])
+  @@map("users")
+}
+
+model FriendRequest {
+  id         String              @id @default(cuid())
+  senderId   String              @map("sender_id")
+  receiverId String              @map("receiver_id")
+  status     FriendRequestStatus @default(PENDING)
+  message    String?
+  createdAt  DateTime            @default(now()) @map("created_at")
+  updatedAt  DateTime            @updatedAt @map("updated_at")
+
+  sender   User @relation("SentRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  @@unique([senderId, receiverId])
+  @@index([receiverId])
+  @@map("friend_requests")
+}
+
+// ============================================================
+// GROUP MODELS
+// ============================================================
+
+model Group {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  avatarUrl   String?  @map("avatar_url")
+  bannerUrl   String?  @map("banner_url")
+  isPrivate   Boolean  @default(true) @map("is_private")
+  inviteCode  String?  @unique @map("invite_code")
+  ownerId     String   @map("owner_id")
+  maxMembers  Int      @default(50) @map("max_members")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  owner      User          @relation("GroupOwner", fields: [ownerId], references: [id])
+  members    GroupMember[]
+  channels   Channel[]
+  events     Event[]
+  albums     Album[]
+  games      Game[]
+  timeCapsules TimeCapsule[]
+  voiceRooms VoiceRoom[]
+  invites    GroupInvite[]
+  analytics  Analytics[]
+
+  @@index([slug])
+  @@index([inviteCode])
+  @@map("groups")
+}
+
+model GroupMember {
+  id         String    @id @default(cuid())
+  groupId    String    @map("group_id")
+  userId     String    @map("user_id")
+  role       GroupRole @default(MEMBER)
+  nickname   String?
+  joinedAt   DateTime  @default(now()) @map("joined_at")
+  mutedUntil DateTime? @map("muted_until")
+  isBanned   Boolean   @default(false) @map("is_banned")
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([groupId])
+  @@index([userId])
+  @@map("group_members")
+}
+
+model GroupInvite {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  code      String   @unique
+  maxUses   Int?     @map("max_uses")
+  useCount  Int      @default(0) @map("use_count")
+  expiresAt DateTime? @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  group Group @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@map("group_invites")
+}
+
+// ============================================================
+// CHANNEL + CHAT MODELS
+// ============================================================
+
+model Channel {
+  id          String      @id @default(cuid())
+  groupId     String      @map("group_id")
+  name        String
+  description String?
+  type        ChannelType @default(TEXT)
+  position    Int         @default(0)
+  isNsfw      Boolean     @default(false) @map("is_nsfw")
+  slowMode    Int?        @map("slow_mode") // seconds
+  createdById String      @map("created_by_id")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  group      Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy  User           @relation("ChannelCreator", fields: [createdById], references: [id])
+  messages   Message[]
+  voiceRoom  VoiceRoom?
+  pins       PinnedMessage[]
+
+  @@index([groupId])
+  @@map("channels")
+}
+
+model Message {
+  id          String      @id @default(cuid())
+  channelId   String      @map("channel_id")
+  authorId    String      @map("author_id")
+  content     String?
+  type        MessageType @default(TEXT)
+  editedAt    DateTime?   @map("edited_at")
+  isDeleted   Boolean     @default(false) @map("is_deleted")
+  isPinned    Boolean     @default(false) @map("is_pinned")
+  replyToId   String?     @map("reply_to_id")
+  threadId    String?     @map("thread_id")
+  metadata    Json?       // for polls, embeds, etc.
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  channel      Channel          @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author       User             @relation(fields: [authorId], references: [id])
+  replyTo      Message?         @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies      Message[]        @relation("MessageReplies")
+  attachments  MessageAttachment[]
+  reactions    MessageReaction[]
+  thread       Thread?
+  pinnedBy     PinnedMessage[]
+  threadMessages ThreadMessage[]
+  mentions     MessageMention[]
+  readBy       MessageRead[]
+
+  @@index([channelId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id        String    @id @default(cuid())
+  messageId String    @map("message_id")
+  url       String
+  filename  String
+  size      Int       // bytes
+  mimeType  String    @map("mime_type")
+  width     Int?
+  height    Int?
+  duration  Float?    // for audio/video
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("message_attachments")
+}
+
+model MessageReaction {
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@map("message_reactions")
+}
+
+model Thread {
+  id        String   @id @default(cuid())
+  messageId String   @unique @map("message_id")
+  title     String?
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  message  Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  messages ThreadMessage[]
+
+  @@map("threads")
+}
+
+model ThreadMessage {
+  id        String   @id @default(cuid())
+  threadId  String   @map("thread_id")
+  messageId String   @map("message_id")
+  authorId  String   @map("author_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  thread  Thread  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@map("thread_messages")
+}
+
+model MessageMention {
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_mentions")
+}
+
+model MessageRead {
+  id        String   @id @default(cuid())
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  readAt    DateTime @default(now()) @map("read_at")
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@map("message_reads")
+}
+
+model PinnedMessage {
+  id        String   @id @default(cuid())
+  channelId String   @map("channel_id")
+  messageId String   @map("message_id")
+  pinnedById String  @map("pinned_by_id")
+  pinnedAt  DateTime @default(now()) @map("pinned_at")
+
+  channel  Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  message  Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  pinnedBy User    @relation(fields: [pinnedById], references: [id])
+
+  @@unique([channelId, messageId])
+  @@map("pinned_messages")
+}
+
+model DirectMessage {
+  id         String      @id @default(cuid())
+  senderId   String      @map("sender_id")
+  receiverId String      @map("receiver_id")
+  content    String?
+  type       MessageType @default(TEXT)
+  isRead     Boolean     @default(false) @map("is_read")
+  isDeleted  Boolean     @default(false) @map("is_deleted")
+  editedAt   DateTime?   @map("edited_at")
+  metadata   Json?
+  createdAt  DateTime    @default(now()) @map("created_at")
+
+  sender    User @relation("DMSender", fields: [senderId], references: [id])
+  receiver  User @relation("DMReceiver", fields: [receiverId], references: [id])
+
+  @@index([senderId, receiverId])
+  @@index([createdAt])
+  @@map("direct_messages")
+}
+
+// ============================================================
+// VOICE / VIDEO ROOM MODELS
+// ============================================================
+
+model VoiceRoom {
+  id          String   @id @default(cuid())
+  channelId   String   @unique @map("channel_id")
+  groupId     String   @map("group_id")
+  livekitRoom String?  @map("livekit_room")
+  isActive    Boolean  @default(false) @map("is_active")
+  maxUsers    Int      @default(25) @map("max_users")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  channel      Channel                @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  group        Group                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  participants VoiceRoomParticipant[]
+
+  @@map("voice_rooms")
+}
+
+model VoiceRoomParticipant {
+  id          String   @id @default(cuid())
+  voiceRoomId String   @map("voice_room_id")
+  userId      String   @map("user_id")
+  isMuted     Boolean  @default(false) @map("is_muted")
+  isDeafened  Boolean  @default(false) @map("is_deafened")
+  isSpeaking  Boolean  @default(false) @map("is_speaking")
+  joinedAt    DateTime @default(now()) @map("joined_at")
+
+  voiceRoom VoiceRoom @relation(fields: [voiceRoomId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([voiceRoomId, userId])
+  @@map("voice_room_participants")
+}
+
+// ============================================================
+// MEDIA / MEMORY GALLERY MODELS
+// ============================================================
+
+model Media {
+  id            String    @id @default(cuid())
+  uploadedById  String    @map("uploaded_by_id")
+  groupId       String?   @map("group_id")
+  url           String
+  thumbnailUrl  String?   @map("thumbnail_url")
+  cloudinaryId  String?   @map("cloudinary_id")
+  filename      String
+  size          Int       // bytes
+  mimeType      String    @map("mime_type")
+  type          MediaType
+  width         Int?
+  height        Int?
+  duration      Float?    // video duration in seconds
+  caption       String?
+  takenAt       DateTime? @map("taken_at")
+  location      String?
+  isFavorite    Boolean   @default(false) @map("is_favorite")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  uploadedBy  User       @relation(fields: [uploadedById], references: [id])
+  albumPhotos AlbumMedia[]
+  tags        PhotoTag[]
+  comments    Comment[]
+  likes       Like[]
+
+  @@index([uploadedById])
+  @@index([groupId])
+  @@index([createdAt])
+  @@map("media")
+}
+
+model Album {
+  id          String   @id @default(cuid())
+  groupId     String   @map("group_id")
+  name        String
+  description String?
+  coverUrl    String?  @map("cover_url")
+  isShared    Boolean  @default(true) @map("is_shared")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  group  Group        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  photos AlbumMedia[]
+
+  @@map("albums")
+}
+
+model AlbumMedia {
+  id      String @id @default(cuid())
+  albumId String @map("album_id")
+  mediaId String @map("media_id")
+
+  album Album @relation(fields: [albumId], references: [id], onDelete: Cascade)
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+
+  @@unique([albumId, mediaId])
+  @@map("album_media")
+}
+
+model PhotoTag {
+  id      String @id @default(cuid())
+  mediaId String @map("media_id")
+  userId  String @map("user_id")
+  x       Float? // position for face tags
+  y       Float?
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, userId])
+  @@map("photo_tags")
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  mediaId   String   @map("media_id")
+  authorId  String   @map("author_id")
+  content   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  media  Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  author User  @relation(fields: [authorId], references: [id])
+
+  @@map("comments")
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  mediaId   String   @map("media_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  media Media @relation(fields: [mediaId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([mediaId, userId])
+  @@map("likes")
+}
+
+// ============================================================
+// EVENT + PLANNING MODELS
+// ============================================================
+
+model Event {
+  id          String      @id @default(cuid())
+  groupId     String      @map("group_id")
+  createdById String      @map("created_by_id")
+  title       String
+  description String?
+  type        EventType   @default(CUSTOM)
+  status      EventStatus @default(SCHEDULED)
+  startDate   DateTime    @map("start_date")
+  endDate     DateTime?   @map("end_date")
+  location    String?
+  coverUrl    String?     @map("cover_url")
+  budget      Float?
+  metadata    Json?       // trip details, packing list, etc.
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  group     Group          @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy User           @relation("EventCreator", fields: [createdById], references: [id])
+  attendees EventAttendee[]
+  polls     Poll[]
+  expenses  Expense[]
+
+  @@index([groupId])
+  @@map("events")
+}
+
+model EventAttendee {
+  id       String @id @default(cuid())
+  eventId  String @map("event_id")
+  userId   String @map("user_id")
+  response String @default("PENDING") // PENDING, GOING, NOT_GOING, MAYBE
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, userId])
+  @@map("event_attendees")
+}
+
+model Poll {
+  id        String   @id @default(cuid())
+  eventId   String?  @map("event_id")
+  groupId   String?  @map("group_id")
+  question  String
+  options   Json     // array of {id, text} objects
+  endsAt    DateTime? @map("ends_at")
+  isMulti   Boolean  @default(false) @map("is_multi")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  event Event?      @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  votes PollVote[]
+
+  @@map("polls")
+}
+
+model PollVote {
+  id       String @id @default(cuid())
+  pollId   String @map("poll_id")
+  userId   String @map("user_id")
+  optionId String @map("option_id")
+
+  poll Poll @relation(fields: [pollId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([pollId, userId, optionId])
+  @@map("poll_votes")
+}
+
+model Expense {
+  id          String   @id @default(cuid())
+  eventId     String   @map("event_id")
+  paidById    String   @map("paid_by_id")
+  title       String
+  amount      Float
+  currency    String   @default("USD")
+  splitType   String   @default("EQUAL") // EQUAL, CUSTOM, PERCENTAGE
+  splits      Json     // {userId: amount} pairs
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@map("expenses")
+}
+
+// ============================================================
+// GAMES / ARCADE MODELS
+// ============================================================
+
+model Game {
+  id        String     @id @default(cuid())
+  groupId   String     @map("group_id")
+  type      GameType
+  status    GameStatus @default(WAITING)
+  state     Json?      // game-specific state
+  winnerId  String?    @map("winner_id")
+  createdAt DateTime   @default(now()) @map("created_at")
+  endedAt   DateTime?  @map("ended_at")
+
+  group        Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  participants GameParticipant[]
+
+  @@index([groupId])
+  @@map("games")
+}
+
+model GameParticipant {
+  id      String @id @default(cuid())
+  gameId  String @map("game_id")
+  userId  String @map("user_id")
+  score   Int    @default(0)
+  rank    Int?
+  metadata Json?  // player-specific game state
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([gameId, userId])
+  @@map("game_participants")
+}
+
+// ============================================================
+// TIME CAPSULE MODELS
+// ============================================================
+
+model TimeCapsule {
+  id          String            @id @default(cuid())
+  groupId     String            @map("group_id")
+  createdById String            @map("created_by_id")
+  ownerId     String            @map("owner_id")
+  title       String
+  description String?
+  unlocksAt   DateTime          @map("unlocks_at")
+  status      TimeCapsuleStatus @default(SEALED)
+  coverUrl    String?           @map("cover_url")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  group     Group                @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdBy User                 @relation("TimeCapsuleCreator", fields: [createdById], references: [id])
+  owner     User                 @relation("TimeCapsuleOwner", fields: [ownerId], references: [id])
+  messages  TimeCapsuleMessage[]
+
+  @@map("time_capsules")
+}
+
+model TimeCapsuleMessage {
+  id            String   @id @default(cuid())
+  capsuleId     String   @map("capsule_id")
+  authorId      String   @map("author_id")
+  content       String
+  mediaUrls     Json?    @map("media_urls")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  capsule TimeCapsule @relation(fields: [capsuleId], references: [id], onDelete: Cascade)
+  author  User        @relation(fields: [authorId], references: [id])
+
+  @@map("time_capsule_messages")
+}
+
+// ============================================================
+// NOTIFICATION MODELS
+// ============================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String           @map("user_id")
+  type      NotificationType
+  title     String
+  body      String?
+  data      Json?            // contextual data for deep links
+  isRead    Boolean          @default(false) @map("is_read")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  endpoint  String
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, endpoint])
+  @@map("push_subscriptions")
+}
+
+// ============================================================
+// ACHIEVEMENT MODELS
+// ============================================================
+
+model Achievement {
+  id          String          @id @default(cuid())
+  key         String          @unique
+  name        String
+  description String
+  iconUrl     String?         @map("icon_url")
+  type        AchievementType
+  xpReward    Int             @default(0) @map("xp_reward")
+
+  userAchievements UserAchievement[]
+
+  @@map("achievements")
+}
+
+model UserAchievement {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  achievementId String   @map("achievement_id")
+  unlockedAt    DateTime @default(now()) @map("unlocked_at")
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement Achievement @relation(fields: [achievementId], references: [id])
+
+  @@unique([userId, achievementId])
+  @@map("user_achievements")
+}
+
+// ============================================================
+// ANALYTICS MODELS
+// ============================================================
+
+model Analytics {
+  id        String   @id @default(cuid())
+  userId    String?  @map("user_id")
+  groupId   String?  @map("group_id")
+  event     String   // e.g. "message_sent", "photo_uploaded"
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  group Group? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([groupId])
+  @@index([event])
+  @@index([createdAt])
+  @@map("analytics")
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  action    String
+  metadata  Json?
+  ip        String?
+  userAgent String?  @map("user_agent")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+// ============================================================
+// CINEMA / WATCH PARTY MODELS
+// ============================================================
+
+model CinemaRoom {
+  id              String   @id @default(cuid())
+  groupId         String   @map("group_id")
+  hostId          String   @map("host_id")
+  title           String
+  currentVideoUrl String?  @map("current_video_url")
+  videoType       String   @default("YOUTUBE") // YOUTUBE, UPLOADED, PLEX
+  currentTime     Float    @default(0) @map("current_time")
+  isPlaying       Boolean  @default(false) @map("is_playing")
+  isTheaterMode   Boolean  @default(false) @map("is_theater_mode")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  queue CinemaQueueItem[]
+
+  @@map("cinema_rooms")
+}
+
+model CinemaQueueItem {
+  id           String   @id @default(cuid())
+  roomId       String   @map("room_id")
+  videoUrl     String   @map("video_url")
+  title        String
+  thumbnailUrl String?  @map("thumbnail_url")
+  addedById    String   @map("added_by_id")
+  votesCount   Int      @default(0) @map("votes_count")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  room CinemaRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@map("cinema_queue_items")
+}
+
+model CinemaHistory {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  videoUrl  String   @map("video_url")
+  title     String
+  watchedAt DateTime @default(now()) @map("watched_at")
+
+  @@map("cinema_history")
+}
+
+// ============================================================
+// HANGOUT ARCADE & SOCIAL SYSTEMS MODELS
+// ============================================================
+
+model GameMatch {
+  id        String   @id @default(cuid())
+  gameType  String   @map("game_type") // UNO, CHESS, LUDO, TIC_TAC_TOE, CONNECT_FOUR, PICTIONARY, MEMORY, RPS, QUIZ, TRUTH_DARE, WOULD_RATHER
+  status    String   @default("PLAYING") // LOBBY, PLAYING, FINISHED
+  winnerId  String?  @map("winner_id")
+  hostId    String   @map("host_id")
+  state     Json?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("game_matches")
+}
+
+model Quiz {
+  id          String   @id @default(cuid())
+  creatorId   String   @map("creator_id")
+  title       String
+  category    String   @default("General")
+  questions   Json
+  timeLimit   Int      @default(30) @map("time_limit")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("quizzes")
+}
+
+model SquadAchievement {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  code        String
+  title       String
+  description String
+  badgeIcon   String   @map("badge_icon")
+  unlockedAt  DateTime @default(now()) @map("unlocked_at")
+
+  @@map("squad_achievements")
+}
+
+model ActivityFeedItem {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  userName    String   @map("user_name")
+  userAvatar  String   @map("user_avatar")
+  action      String
+  targetTitle String   @map("target_title")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("activity_feed_items")
+}
+
+model UserProgress {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  xp          Int      @default(1250)
+  level       Int      @default(5)
+  title       String   @default("Squad Challenger 🎮")
+  gamesWon    Int      @default(12) @map("games_won")
+  quizWins    Int      @default(4) @map("quiz_wins")
+  streakDays  Int      @default(14) @map("streak_days")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("user_progress")
+}
+
+model ReunionPlan {
+  id             String   @id @default(cuid())
+  title          String
+  city           String
+  venueOptions   Json     @map("venue_options")
+  dateOptions    Json     @map("date_options")
+  budget         Float    @default(0)
+  roomAllocation Json     @map("room_allocation")
+  travelAgenda   Json     @map("travel_agenda")
+  packingList    Json     @map("packing_list")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("reunion_plans")
+}
+
+model TripPlan {
+  id            String   @id @default(cuid())
+  destination   String
+  coordinates   Json?
+  hotelDetails  Json?    @map("hotel_details")
+  flightDetails Json?    @map("flight_details")
+  placesToVisit Json     @map("places_to_visit")
+  weather       String   @default("Sunny 28°C")
+  packingList   Json     @map("packing_list")
+  budgetTotal   Float    @default(0) @map("budget_total")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@map("trip_plans")
+}
+
+model GroupCalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  category    String   @default("Event")
+  startTime   DateTime @map("start_time")
+  endTime     DateTime @map("end_time")
+  colorTag    String   @default("violet") @map("color_tag")
+  isRecurring Boolean  @default(false) @map("is_recurring")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("group_calendar_events")
+}
+
+model PollItem {
+  id          String   @id @default(cuid())
+  question    String
+  pollType    String   @default("single") @map("poll_type")
+  options     Json
+  votes       Json
+  isAnonymous Boolean  @default(false) @map("is_anonymous")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("poll_items")
+}
+
+model SharedDocument {
+  id          String   @id @default(cuid())
+  title       String
+  content     String
+  tags        String[]
+  authorId    String   @map("author_id")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("shared_documents")
+}
+
+model ExpenseSplit {
+  id          String   @id @default(cuid())
+  title       String
+  amount      Float
+  paidBy      String   @map("paid_by")
+  splitWith   Json     @map("split_with")
+  currency    String   @default("USD")
+  settled     Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("expense_splits")
+}
+
+model BucketListItem {
+  id          String    @id @default(cuid())
+  title       String
+  category    String    @default("Adventure")
+  isCompleted Boolean   @default(false) @map("is_completed")
+  proofImage  String?   @map("proof_image")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@map("bucket_list_items")
+}
+
+model MemoryWallPost {
+  id         String   @id @default(cuid())
+  authorName String   @map("author_name")
+  avatar     String
+  postType   String   @default("photo") @map("post_type")
+  mediaUrl   String?  @map("media_url")
+  content    String
+  reactions  Json
+  pinned     Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("memory_wall_posts")
+}
+
+model YearbookPage {
+  id         String   @id @default(cuid())
+  userId     String   @unique @map("user_id")
+  userName   String   @map("user_name")
+  avatar     String
+  signatures Json
+  isLocked   Boolean  @default(false) @map("is_locked")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("yearbook_pages")
+}
+
+model TimeCapsuleEntry {
+  id               String   @id @default(cuid())
+  title            String
+  authorName       String   @map("author_name")
+  unlockDate       DateTime @map("unlock_date")
+  encryptedContent String   @map("encrypted_content")
+  mediaUrls        String[] @map("media_urls")
+  isUnlocked       Boolean  @default(false) @map("is_unlocked")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@map("time_capsule_entries")
+}
+
+model BirthdayPage {
+  id           String   @id @default(cuid())
+  userId       String   @unique @map("user_id")
+  userName     String   @map("user_name")
+  birthDate    DateTime @map("birth_date")
+  giftWishlist Json     @map("gift_wishlist")
+  wishes       Json
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("birthday_pages")
+}
+
+model AiChatMessage {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  prompt    String
+  response  String
+  intent    String   @default("chat")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ai_chat_messages")
+}
+
+model AiPhotoAnalysis {
+  id             String   @id @default(cuid())
+  mediaId        String   @map("media_id")
+  caption        String
+  detectedPeople String[] @map("detected_people")
+  detectedLocation String? @map("detected_location")
+  tags           String[]
+  hasCelebration Boolean  @default(false) @map("has_celebration")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@map("ai_photo_analyses")
+}
+
+model AiMemoryStory {
+  id        String   @id @default(cuid())
+  title     String
+  storyType String   @default("travel") @map("story_type")
+  content   String
+  authorId  String   @map("author_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ai_memory_stories")
+}
+
+model AiRecommendation {
+  id         String   @id @default(cuid())
+  category   String
+  title      String
+  reason     String
+  score      Float    @default(0.95)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@map("ai_recommendations")
+}
+
+model AiScrapbook {
+  id        String   @id @default(cuid())
+  title     String
+  year      Int      @default(2026)
+  pages     Json
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("ai_scrapbooks")
+}
+
+model ClubhouseRoomState {
+  id         String   @id @default(cuid())
+  roomId     String   @unique @map("room_id")
+  roomName   String   @map("room_name")
+  lighting   String   @default("Sunset Amber")
+  wallpaper  String   @default("Deep Neon Navy")
+  furniture  Json
+  posters    String[]
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@map("clubhouse_room_states")
+}
+
+model PlayerAvatarState {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  userName    String   @map("user_name")
+  avatarModel String   @default("cyberpunk_hoodie") @map("avatar_model")
+  positionX   Float    @default(0.0) @map("position_x")
+  positionY   Float    @default(0.0) @map("position_y")
+  positionZ   Float    @default(0.0) @map("position_z")
+  animation   String   @default("idle")
+  currentRoom String   @default("living_room") @map("current_room")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("player_avatar_states")
+}
+
+model SpatialVoiceSession {
+  id          String   @id @default(cuid())
+  roomId      String   @map("room_id")
+  userId      String   @map("user_id")
+  attenuation Float    @default(1.0)
+  isMuted     Boolean  @default(false) @map("is_muted")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("spatial_voice_sessions")
+}
+
+
+

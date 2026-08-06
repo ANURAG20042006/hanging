@@ -1,0 +1,85 @@
+groups:
+  - name: hangout_api_alerts
+    interval: 30s
+    rules:
+
+      # API Down
+      - alert: HangoutAPIDown
+        expr: up{job="hangout-api"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "Hangout API is DOWN"
+          description: "The hangout-api service has been unreachable for more than 1 minute."
+
+      # High API Error Rate (>5% 5xx)
+      - alert: HighAPIErrorRate
+        expr: >
+          sum(rate(http_requests_total{job="hangout-api",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{job="hangout-api"}[5m])) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "API 5xx error rate > 5%"
+          description: "Error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # High API Latency (p99 > 500ms)
+      - alert: HighAPILatency
+        expr: >
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{job="hangout-api"}[5m])) by (le)
+          ) > 0.5
+        for: 3m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "API p99 latency > 500ms"
+          description: "P99 latency is {{ $value | humanizeDuration }}."
+
+  - name: hangout_infra_alerts
+    rules:
+
+      # Redis Down
+      - alert: RedisDown
+        expr: up{job="redis"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis is DOWN"
+
+      # Postgres Down
+      - alert: PostgresDown
+        expr: up{job="postgres"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is DOWN"
+
+      # High Memory Usage
+      - alert: HighMemoryUsage
+        expr: >
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) > 0.90
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Host memory usage > 90%"
+          description: "Memory usage is {{ $value | humanizePercentage }}."
+
+      # Pod CPU throttling
+      - alert: ContainerCPUThrottling
+        expr: >
+          rate(container_cpu_cfs_throttled_seconds_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container CPU being throttled"

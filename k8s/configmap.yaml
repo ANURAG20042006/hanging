@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hangout-config
+  namespace: hangout-prod
+  labels:
+    app: hangout
+    environment: production
+data:
+  NODE_ENV: "production"
+  PORT: "3001"
+  NEXT_PUBLIC_API_URL: "https://api.hangout.app"
+  LOG_LEVEL: "info"
+  TZ: "UTC"

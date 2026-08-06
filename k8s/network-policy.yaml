@@ -1,0 +1,249 @@
+---
+# Default deny-all policy — blocks all ingress and egress within the namespace
+# Individual policies below open up only the required traffic paths
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+
+---
+# Allow DNS resolution for all pods (UDP/TCP port 53 to kube-dns)
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+---
+# Allow NGINX Ingress Controller to reach the web service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-web
+  namespace: hangout-prod
+  labels:
+    app: hangout-web
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: hangout-web
+      component: web
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+
+---
+# Allow NGINX Ingress Controller to reach the API service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-api
+  namespace: hangout-prod
+  labels:
+    app: hangout-api
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: hangout-api
+      component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3001
+
+---
+# Allow web pods to call the API service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-to-api
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: hangout-api
+      component: api
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: hangout-web
+              component: web
+      ports:
+        - protocol: TCP
+          port: 3001
+
+---
+# Allow API pods to reach Redis
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-to-redis
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+      component: cache
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: hangout-api
+              component: api
+      ports:
+        - protocol: TCP
+          port: 6379
+
+---
+# Allow Redis cluster bus communication between Redis pods
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-cluster-bus
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: redis
+      component: cache
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: redis
+              component: cache
+      ports:
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 16379
+  egress:
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+              component: cache
+      ports:
+        - protocol: TCP
+          port: 6379
+        - protocol: TCP
+          port: 16379
+
+---
+# Allow API pods egress to Redis and external services
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-api-egress
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: hangout-api
+      component: api
+  policyTypes:
+    - Egress
+  egress:
+    # To Redis within namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app: redis
+              component: cache
+      ports:
+        - protocol: TCP
+          port: 6379
+    # To external HTTPS (database, LiveKit, etc.)
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 5432
+
+---
+# Allow web pods egress to API service
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-web-egress
+  namespace: hangout-prod
+  labels:
+    environment: production
+spec:
+  podSelector:
+    matchLabels:
+      app: hangout-web
+      component: web
+  policyTypes:
+    - Egress
+  egress:
+    # To API within namespace
+    - to:
+        - podSelector:
+            matchLabels:
+              app: hangout-api
+              component: api
+      ports:
+        - protocol: TCP
+          port: 3001
+    # To external HTTPS
+    - ports:
+        - protocol: TCP
+          port: 443

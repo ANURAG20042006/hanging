@@ -1,0 +1,212 @@
+---
+# Headless Service for Redis StatefulSet DNS discovery
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: hangout-prod
+  labels:
+    app: redis
+    component: cache
+    environment: production
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+
+---
+# Client-facing Redis Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-svc
+  namespace: hangout-prod
+  labels:
+    app: redis
+    component: cache
+    environment: production
+spec:
+  type: ClusterIP
+  selector:
+    app: redis
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+      protocol: TCP
+
+---
+# ConfigMap for Redis cluster configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-config
+  namespace: hangout-prod
+  labels:
+    app: redis
+    component: cache
+data:
+  redis.conf: |
+    # Memory policy
+    maxmemory 512mb
+    maxmemory-policy allkeys-lru
+
+    # Cluster mode
+    cluster-enabled yes
+    cluster-config-file /data/nodes.conf
+    cluster-node-timeout 5000
+    cluster-announce-port 6379
+    cluster-announce-bus-port 16379
+
+    # Persistence — AOF for durability
+    appendonly yes
+    appendfsync everysec
+    no-appendfsync-on-rewrite no
+
+    # Network
+    bind 0.0.0.0
+    protected-mode no
+    port 6379
+
+    # Logging
+    loglevel notice
+    logfile ""
+
+    # Slow log
+    slowlog-log-slower-than 10000
+    slowlog-max-len 128
+
+---
+# Redis StatefulSet (3-node cluster)
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: hangout-prod
+  labels:
+    app: redis
+    component: cache
+    environment: production
+spec:
+  serviceName: redis-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: redis
+  updateStrategy:
+    type: RollingUpdate
+  podManagementPolicy: OrderedReady
+  template:
+    metadata:
+      labels:
+        app: redis
+        component: cache
+        environment: production
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      initContainers:
+        - name: init-redis
+          image: redis:7-alpine
+          command:
+            - sh
+            - -c
+            - |
+              cp /etc/redis/redis.conf /data/redis.conf
+              echo "Redis configuration initialized"
+          volumeMounts:
+            - name: redis-config
+              mountPath: /etc/redis
+            - name: redis-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      containers:
+        - name: redis
+          image: redis:7-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - redis-server
+            - /data/redis.conf
+          ports:
+            - name: redis
+              containerPort: 6379
+              protocol: TCP
+            - name: cluster-bus
+              containerPort: 16379
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "768Mi"
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping | grep PONG
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - redis-cli ping | grep PONG
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: redis-data
+              mountPath: /data
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: redis-config
+          configMap:
+            name: redis-config
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - redis
+              topologyKey: kubernetes.io/hostname
+  volumeClaimTemplates:
+    - metadata:
+        name: redis-data
+        labels:
+          app: redis
+          component: cache
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+        # Uncomment and set storageClassName to match your cluster's storage class
+        # storageClassName: standard

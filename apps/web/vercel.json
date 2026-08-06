@@ -1,0 +1,13 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "cd ../.. && pnpm build --filter=@hangout/web",
+  "outputDirectory": ".next",
+  "installCommand": "cd ../.. && pnpm install --frozen-lockfile",
+  "devCommand": "pnpm dev",
+  "ignoreCommand": "git diff HEAD^ HEAD --quiet .",
+  "env": {
+    "NEXT_PUBLIC_APP_NAME": "Hangout",
+    "TURBO_TEAM": "@hangout",
+    "TURBO_REMOTE_CACHE_SIGNATURE_KEY": ""
+  }
+}

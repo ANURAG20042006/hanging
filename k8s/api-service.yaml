@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: hangout-api-svc
+  namespace: hangout-prod
+  labels:
+    app: hangout-api
+    component: api
+    environment: production
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "3001"
+spec:
+  type: ClusterIP
+  selector:
+    app: hangout-api
+    component: api
+  ports:
+    - name: http
+      protocol: TCP
+      port: 3001
+      targetPort: 3001
+  sessionAffinity: None

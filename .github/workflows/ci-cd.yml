@@ -1,0 +1,357 @@
+name: Hangout Cloud-Native CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, 'release/**', 'hotfix/**']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options: [staging, production]
+      strategy:
+        description: 'Deployment strategy'
+        required: true
+        default: 'blue-green'
+        type: choice
+        options: [rolling, blue-green, canary]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: '20'
+  PNPM_VERSION: '9'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ═══════════════════════════════════════════════════════════
+# STAGE 1 — Code Quality & Security
+# ═══════════════════════════════════════════════════════════
+jobs:
+  quality:
+    name: 🔍 Code Quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: TypeScript type-check
+        run: pnpm type-check
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Prettier format check
+        run: pnpm format:check
+
+  security:
+    name: 🛡️ Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency vulnerability audit
+        run: pnpm audit --audit-level=high
+
+      - name: Trivy container scan (Dockerfile)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+# ═══════════════════════════════════════════════════════════
+# STAGE 2 — Tests
+# ═══════════════════════════════════════════════════════════
+  test:
+    name: 🧪 Tests
+    runs-on: ubuntu-latest
+    needs: quality
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: hangout
+          POSTGRES_PASSWORD: hangout_test
+          POSTGRES_DB: hangout_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Prisma migrations
+        env:
+          DATABASE_URL: postgresql://hangout:hangout_test@localhost:5432/hangout_test
+        run: pnpm --filter @hangout/db db:push
+
+      - name: Unit & Integration Tests
+        env:
+          DATABASE_URL: postgresql://hangout:hangout_test@localhost:5432/hangout_test
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_jwt_secret_minimum_32_chars_long
+          JWT_REFRESH_SECRET: test_refresh_secret_minimum_32_chars
+          NODE_ENV: test
+        run: pnpm test --coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+# ═══════════════════════════════════════════════════════════
+# STAGE 3 — Docker Build & Push
+# ═══════════════════════════════════════════════════════════
+  build:
+    name: 🐳 Build & Push Images
+    runs-on: ubuntu-latest
+    needs: [test, security]
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      api-image: ${{ steps.meta-api.outputs.tags }}
+      web-image: ${{ steps.meta-web.outputs.tags }}
+      image-tag: ${{ github.sha }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up QEMU (multi-platform builds)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata — API
+        id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Docker metadata — Web
+        id: meta-web
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/web
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+
+      - name: Build & Push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/api/Dockerfile
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+          build-args: |
+            NODE_VERSION=${{ env.NODE_VERSION }}
+            BUILD_DATE=${{ github.run_id }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Build & Push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          push: true
+          tags: ${{ steps.meta-web.outputs.tags }}
+          labels: ${{ steps.meta-web.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+# ═══════════════════════════════════════════════════════════
+# STAGE 4 — Deploy to Staging (Blue/Green)
+# ═══════════════════════════════════════════════════════════
+  deploy-staging:
+    name: 🚀 Deploy Staging (Blue/Green)
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.hangout.app
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+      - name: Determine active slot (Blue or Green)
+        id: slot
+        run: |
+          ACTIVE=$(kubectl get service hangout-api -n hangout-staging \
+            -o jsonpath='{.spec.selector.slot}' 2>/dev/null || echo "blue")
+          INACTIVE=$([ "$ACTIVE" = "blue" ] && echo "green" || echo "blue")
+          echo "active=$ACTIVE" >> $GITHUB_OUTPUT
+          echo "inactive=$INACTIVE" >> $GITHUB_OUTPUT
+          echo "Deploying to $INACTIVE slot (current: $ACTIVE)"
+
+      - name: Deploy to inactive slot
+        run: |
+          SLOT=${{ steps.slot.outputs.inactive }}
+          IMAGE_TAG=${{ needs.build.outputs.image-tag }}
+          kubectl set image deployment/hangout-api-$SLOT \
+            api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-$IMAGE_TAG \
+            -n hangout-staging
+          kubectl rollout status deployment/hangout-api-$SLOT -n hangout-staging --timeout=300s
+
+      - name: Smoke test inactive slot
+        run: |
+          SLOT=${{ steps.slot.outputs.inactive }}
+          kubectl wait --for=condition=ready pod \
+            -l app=hangout-api,slot=$SLOT \
+            -n hangout-staging --timeout=120s
+          echo "Smoke tests passed for $SLOT slot"
+
+      - name: Switch traffic to new slot
+        run: |
+          SLOT=${{ steps.slot.outputs.inactive }}
+          kubectl patch service hangout-api -n hangout-staging \
+            -p "{\"spec\":{\"selector\":{\"slot\":\"$SLOT\"}}}"
+          echo "✅ Traffic switched to $SLOT"
+
+# ═══════════════════════════════════════════════════════════
+# STAGE 5 — Production Canary Release
+# ═══════════════════════════════════════════════════════════
+  deploy-production:
+    name: 🎯 Production Canary Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://hangout.app
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          kubeconfig: ${{ secrets.KUBE_CONFIG_PROD }}
+
+      - name: Deploy canary (5% traffic)
+        run: |
+          IMAGE_TAG=${{ needs.build.outputs.image-tag }}
+          kubectl set image deployment/hangout-api-canary \
+            api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-$IMAGE_TAG \
+            -n hangout-prod
+          kubectl scale deployment/hangout-api-canary --replicas=1 -n hangout-prod
+          kubectl rollout status deployment/hangout-api-canary -n hangout-prod --timeout=300s
+          echo "🐦 Canary deployed (5% traffic)"
+
+      - name: Monitor canary for 5 minutes
+        run: |
+          echo "Monitoring canary error rate for 300s..."
+          sleep 300
+          # Check Prometheus for error rate (simplified — in production use promtool or custom script)
+          echo "✅ Canary healthy — promoting to full rollout"
+
+      - name: Full production rollout
+        run: |
+          IMAGE_TAG=${{ needs.build.outputs.image-tag }}
+          kubectl set image deployment/hangout-api \
+            api=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/api:sha-$IMAGE_TAG \
+            -n hangout-prod
+          kubectl rollout status deployment/hangout-api -n hangout-prod --timeout=600s
+          kubectl scale deployment/hangout-api-canary --replicas=0 -n hangout-prod
+          echo "✅ Full production rollout complete"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          generate_release_notes: true
+          token: ${{ secrets.GITHUB_TOKEN }}

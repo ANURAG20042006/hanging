@@ -1,0 +1,337 @@
+version: '3.9'
+
+# ============================================================
+# Hangout — Full Cloud-Native Stack (Local Dev + Monitoring)
+# Includes: Postgres, Redis Cluster, Kafka, MinIO, Mailhog,
+#           Prometheus, Grafana, Jaeger (OTEL), API, Web, Nginx
+# ============================================================
+
+services:
+
+  # ─── DATA LAYER ──────────────────────────────────────────
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: hangout_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hangout
+      POSTGRES_PASSWORD: hangout_secret
+      POSTGRES_DB: hangout_db
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hangout -d hangout_db']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hangout_internal
+
+  # Postgres read replica for scaling read-heavy queries
+  postgres_replica:
+    image: postgres:16-alpine
+    container_name: hangout_postgres_replica
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hangout
+      POSTGRES_PASSWORD: hangout_secret
+      POSTGRES_DB: hangout_db
+    ports:
+      - '5433:5432'
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql/data
+    depends_on:
+      - postgres
+    networks:
+      - hangout_internal
+
+  # ─── CACHE LAYER ─────────────────────────────────────────
+
+  redis:
+    image: redis:7-alpine
+    container_name: hangout_redis_primary
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass hangout_redis_secret
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --loglevel warning
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '-a', 'hangout_redis_secret', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hangout_internal
+
+  redis_replica:
+    image: redis:7-alpine
+    container_name: hangout_redis_replica
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass hangout_redis_secret
+      --replicaof redis 6379
+      --masterauth hangout_redis_secret
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    ports:
+      - '6380:6379'
+    depends_on:
+      - redis
+    networks:
+      - hangout_internal
+
+  # ─── MESSAGE QUEUE ────────────────────────────────────────
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: hangout_zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    volumes:
+      - zookeeper_data:/var/lib/zookeeper/data
+    networks:
+      - hangout_internal
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: hangout_kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - '9092:9092'
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_LOG_RETENTION_HOURS: 168
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ['CMD', 'kafka-broker-api-versions', '--bootstrap-server', 'localhost:9092']
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks:
+      - hangout_internal
+
+  # ─── OBJECT STORAGE ──────────────────────────────────────
+
+  minio:
+    image: minio/minio:latest
+    container_name: hangout_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: hangout_minio
+      MINIO_ROOT_PASSWORD: hangout_minio_secret
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9000/minio/health/live']
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - hangout_internal
+
+  # ─── EMAIL / NOTIFICATIONS ────────────────────────────────
+
+  mailhog:
+    image: mailhog/mailhog:latest
+    container_name: hangout_mailhog
+    restart: unless-stopped
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+    logging:
+      driver: 'none'
+    networks:
+      - hangout_internal
+
+  # ─── MONITORING: PROMETHEUS ───────────────────────────────
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: hangout_prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    ports:
+      - '9090:9090'
+    volumes:
+      - ./docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    depends_on:
+      - api
+    networks:
+      - hangout_internal
+      - hangout_monitoring
+
+  # ─── MONITORING: GRAFANA ──────────────────────────────────
+
+  grafana:
+    image: grafana/grafana:10.4.0
+    container_name: hangout_grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: hangout_grafana_secret
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-simple-json-datasource
+    ports:
+      - '3333:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - prometheus
+    networks:
+      - hangout_monitoring
+
+  # ─── MONITORING: JAEGER (OpenTelemetry Tracing) ───────────
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.56
+    container_name: hangout_jaeger
+    restart: unless-stopped
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+      SPAN_STORAGE_TYPE: memory
+    ports:
+      - '16686:16686'   # Jaeger UI
+      - '4317:4317'     # OTLP gRPC
+      - '4318:4318'     # OTLP HTTP
+      - '14268:14268'   # Jaeger HTTP collector
+    networks:
+      - hangout_internal
+      - hangout_monitoring
+
+  # ─── API GATEWAY / REVERSE PROXY ─────────────────────────
+
+  nginx:
+    image: nginx:alpine
+    container_name: hangout_nginx
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./docker/nginx/ssl:/etc/ssl/hangout:ro
+    depends_on:
+      - api
+      - web
+    networks:
+      - hangout_internal
+      - hangout_public
+    healthcheck:
+      test: ['CMD', 'nginx', '-t']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── APPLICATION LAYER ────────────────────────────────────
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    container_name: hangout_api
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      DATABASE_URL: postgresql://hangout:hangout_secret@postgres:5432/hangout_db
+      REDIS_URL: redis://:hangout_redis_secret@redis:6379
+      KAFKA_BROKERS: kafka:29092
+      MINIO_ENDPOINT: minio
+      MINIO_PORT: 9000
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: hangout-api
+    ports:
+      - '3001:3001'
+    volumes:
+      - ./apps/api:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ./apps/api/.env
+    networks:
+      - hangout_internal
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    container_name: hangout_web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      OTEL_SERVICE_NAME: hangout-web
+    ports:
+      - '3000:3000'
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+      - /app/.next
+    depends_on:
+      - api
+    env_file:
+      - ./apps/web/.env.local
+    networks:
+      - hangout_internal
+
+volumes:
+  postgres_data:
+  postgres_replica_data:
+  redis_data:
+  kafka_data:
+  zookeeper_data:
+  minio_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  hangout_internal:
+    name: hangout_internal
+    driver: bridge
+  hangout_monitoring:
+    name: hangout_monitoring
+    driver: bridge
+  hangout_public:
+    name: hangout_public
+    driver: bridge

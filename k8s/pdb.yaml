@@ -1,0 +1,55 @@
+---
+# PodDisruptionBudget for hangout-api
+# Ensures at least 2 API pods are always available during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hangout-api-pdb
+  namespace: hangout-prod
+  labels:
+    app: hangout-api
+    component: api
+    environment: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: hangout-api
+      component: api
+
+---
+# PodDisruptionBudget for hangout-web
+# Ensures at least 1 web pod is always available during voluntary disruptions
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: hangout-web-pdb
+  namespace: hangout-prod
+  labels:
+    app: hangout-web
+    component: web
+    environment: production
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: hangout-web
+      component: web
+
+---
+# PodDisruptionBudget for Redis
+# Ensures at least 2 Redis nodes are always available to maintain cluster quorum
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: redis-pdb
+  namespace: hangout-prod
+  labels:
+    app: redis
+    component: cache
+    environment: production
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: redis

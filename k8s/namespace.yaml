@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hangout-prod
+  labels:
+    name: hangout-prod
+    environment: production
+    managed-by: kubectl
+  annotations:
+    description: "Production namespace for Hangout application"

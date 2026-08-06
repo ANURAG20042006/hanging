@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   DESIGN TOKENS — CSS Custom Properties
+   ============================================================ */
+@layer base {
+  :root {
+    /* Hangout Color System */
+    --color-navy: 228 44% 7%;           /* #0A0E1A */
+    --color-navy-2: 228 40% 10%;        /* #0F1525 */
+    --color-navy-3: 228 35% 14%;        /* #161D2F */
+    --color-violet: 262 83% 58%;        /* #7C3AED */
+    --color-violet-light: 262 100% 70%; /* #9B5BFF */
+    --color-teal: 188 95% 42%;          /* #06B6D4 */
+    --color-teal-light: 188 95% 55%;    /* #22D3EE */
+    --color-rose: 346 77% 60%;          /* #F43F5E */
+    --color-amber: 43 96% 56%;          /* #F59E0B */
+    --color-emerald: 158 64% 52%;       /* #34D399 */
+
+    /* Semantic Tokens */
+    --background: var(--color-navy);
+    --foreground: 210 40% 98%;
+    --card: var(--color-navy-2);
+    --card-foreground: 210 40% 98%;
+    --popover: var(--color-navy-3);
+    --popover-foreground: 210 40% 98%;
+    --primary: var(--color-violet);
+    --primary-foreground: 210 40% 98%;
+    --secondary: var(--color-navy-3);
+    --secondary-foreground: 210 40% 98%;
+    --muted: var(--color-navy-3);
+    --muted-foreground: 215 20% 55%;
+    --accent: var(--color-teal);
+    --accent-foreground: var(--color-navy);
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 228 25% 18%;
+    --input: 228 30% 12%;
+    --ring: var(--color-violet);
+    --radius: 0.875rem;
+
+    /* Surface levels */
+    --surface-0: hsl(228, 44%, 7%);   /* Deepest background */
+    --surface-1: hsl(228, 40%, 10%);  /* Cards */
+    --surface-2: hsl(228, 35%, 13%);  /* Modals, dropdowns */
+    --surface-3: hsl(228, 30%, 17%);  /* Hover states */
+
+    /* Glow colors */
+    --glow-violet: 0 0 30px -5px rgba(124, 58, 237, 0.6);
+    --glow-teal: 0 0 30px -5px rgba(6, 182, 212, 0.6);
+    --glow-rose: 0 0 30px -5px rgba(244, 63, 94, 0.4);
+  }
+}
+
+/* ============================================================
+   BASE RESETS + GLOBAL STYLES
+   ============================================================ */
+@layer base {
+  *, *::before, *::after {
+    @apply border-border box-border;
+  }
+
+  html {
+    @apply scroll-smooth;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    @apply bg-[#0A0E1A] text-foreground font-sans min-h-screen;
+    background-image:
+      radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 58, 237, 0.12) 0%, transparent 70%),
+      radial-gradient(ellipse 60% 40% at 80% 80%, rgba(6, 182, 212, 0.06) 0%, transparent 60%);
+    background-attachment: fixed;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-violet-500/30 text-white;
+  }
+
+  /* Custom Scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 9999px;
+    transition: background 0.2s;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+  }
+
+  /* Focus ring */
+  :focus-visible {
+    @apply outline-none ring-2 ring-violet-500 ring-offset-2 ring-offset-[#0A0E1A];
+  }
+
+  /* Headings */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    @apply tracking-tight;
+  }
+}
+
+/* ============================================================
+   COMPONENT CLASSES
+   ============================================================ */
+@layer components {
+  /* Glass Morphism */
+  .glass {
+    backdrop-filter: blur(16px) saturate(180%);
+    -webkit-backdrop-filter: blur(16px) saturate(180%);
+    @apply bg-white/[0.04] border border-white/[0.08];
+  }
+
+  .glass-card {
+    backdrop-filter: blur(20px) saturate(200%);
+    -webkit-backdrop-filter: blur(20px) saturate(200%);
+    @apply bg-white/[0.05] border border-white/[0.10] rounded-2xl shadow-2xl;
+  }
+
+  .glass-dark {
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    @apply bg-black/30 border border-white/[0.06] rounded-xl;
+  }
+
+  /* Text Gradients */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-cyan-400;
+  }
+
+  .text-gradient-rose {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-rose-400 to-orange-400;
+  }
+
+  .text-gradient-emerald {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-emerald-400 to-teal-400;
+  }
+
+  /* Button variants */
+  .btn-primary {
+    @apply bg-violet-600 hover:bg-violet-500 active:bg-violet-700 text-white font-medium
+           rounded-lg px-4 py-2 transition-all duration-200;
+  }
+
+  .btn-ghost {
+    @apply text-white/70 hover:text-white hover:bg-white/[0.06] rounded-lg px-4 py-2
+           transition-all duration-200;
+  }
+
+  .btn-glass {
+    @apply glass rounded-lg px-4 py-2 text-white/80 hover:text-white
+           hover:bg-white/[0.08] transition-all duration-200;
+  }
+}

@@ -1,0 +1,50 @@
+{
+  "name": "Hangout — The Digital Home for Friends",
+  "short_name": "Hangout",
+  "description": "A private, invite-only digital home for friend groups to chat, share memories, watch movies together, play arcade games, and collaborate.",
+  "start_url": "/clubhouse",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0A0E1A",
+  "theme_color": "#7C3AED",
+  "icons": [
+    {
+      "src": "https://i.postimg.cc/mD363XkH/hangout-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "https://i.postimg.cc/mD363XkH/hangout-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "3D Digital Home",
+      "short_name": "Clubhouse",
+      "url": "/clubhouse",
+      "icons": [{ "src": "https://i.postimg.cc/mD363XkH/hangout-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Hangout Arcade",
+      "short_name": "Arcade",
+      "url": "/arcade",
+      "icons": [{ "src": "https://i.postimg.cc/mD363XkH/hangout-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Planning Hub",
+      "short_name": "Planning",
+      "url": "/planning",
+      "icons": [{ "src": "https://i.postimg.cc/mD363XkH/hangout-icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Assistant",
+      "short_name": "AI Brain",
+      "url": "/ai-assistant",
+      "icons": [{ "src": "https://i.postimg.cc/mD363XkH/hangout-icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
