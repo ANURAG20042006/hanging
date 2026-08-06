@@ -9,7 +9,10 @@ import { Server, Socket } from 'socket.io';
 import { CinemaService } from './cinema.service';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { 
+    origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000'],
+    credentials: true,
+  },
   namespace: '/cinema',
 })
 export class CinemaGateway {

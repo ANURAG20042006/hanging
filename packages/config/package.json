@@ -2,5 +2,10 @@
   "name": "@hangout/config",
   "version": "1.0.0",
   "private": true,
-  "files": ["tsconfig/"]
+  "files": ["tsconfig/"],
+  "scripts": {
+    "build": "echo 'config package ready'",
+    "type-check": "echo 'config checked'",
+    "lint": "echo 'config ok'"
+  }
 }

@@ -10,7 +10,10 @@ import { UseGuards, Logger } from '@nestjs/common';
 import { WsJwtGuard } from '../../common/guards/ws-jwt.guard';
 
 @WebSocketGateway({
-  cors: { origin: '*' },
+  cors: { 
+    origin: process.env.CORS_ORIGINS ? process.env.CORS_ORIGINS.split(',') : ['http://localhost:3000'],
+    credentials: true,
+  },
   namespace: '/clubhouse',
 })
 @UseGuards(WsJwtGuard)
